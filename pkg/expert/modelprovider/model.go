@@ -252,6 +252,9 @@ type ProviderConfig struct {
 	Token       string   `json:"token" yaml:"token,omitempty" toml:"token,omitempty"`
 	Host        string   `json:"host" yaml:"host,omitempty" toml:"host,omitempty"`
 	GoodForTask TaskType `json:"good_for_task" yaml:"good_for_task,omitempty" toml:"good_for_task,omitempty"`
+	// EnableTokenTailoring when true (default) trims conversation history to the model's context window (arXiv:2601.14192).
+	// Set to false to disable (e.g. debugging or when the provider handles context itself).
+	EnableTokenTailoring *bool `json:"enable_token_tailoring,omitempty" yaml:"enable_token_tailoring,omitempty" toml:"enable_token_tailoring,omitempty"`
 }
 
 func (p ProviderConfig) String() string {
@@ -309,10 +312,26 @@ func (p ProviderConfig) Validate(ctx context.Context, sp security.SecretProvider
 	}
 }
 
+// enableTokenTailoring returns true when token tailoring should be enabled (default when unset).
+func (p ProviderConfig) enableTokenTailoring() bool {
+	if p.EnableTokenTailoring == nil {
+		return true
+	}
+	return *p.EnableTokenTailoring
+}
+
 func (p ProviderConfig) toModel(ctx context.Context) (model.Model, error) {
+	tailoring := p.enableTokenTailoring()
+	if tailoring {
+		logger.GetLogger(ctx).Debug("token tailoring enabled for model provider",
+			"provider", p.Provider, "model", p.ModelName)
+	}
 	switch strings.ToLower(p.Provider) {
 	case "openai":
 		opts := []openai.Option{}
+		if tailoring {
+			opts = append(opts, openai.WithEnableTokenTailoring(true))
+		}
 		if p.Token != "" {
 			opts = append(opts, openai.WithAPIKey(p.Token))
 		}
@@ -325,6 +344,9 @@ func (p ProviderConfig) toModel(ctx context.Context) (model.Model, error) {
 		return openai.New(p.ModelName, opts...), nil
 	case "gemini":
 		opts := []gemini.Option{}
+		if tailoring {
+			opts = append(opts, gemini.WithEnableTokenTailoring(true))
+		}
 		if p.Token != "" {
 			opts = append(opts, gemini.WithGeminiClientConfig(&genai.ClientConfig{
 				APIKey: p.Token,
@@ -333,6 +355,9 @@ func (p ProviderConfig) toModel(ctx context.Context) (model.Model, error) {
 		return gemini.New(ctx, p.ModelName, opts...)
 	case "anthropic":
 		opts := []anthropic.Option{}
+		if tailoring {
+			opts = append(opts, anthropic.WithEnableTokenTailoring(true))
+		}
 		if p.Token != "" {
 			opts = append(opts, anthropic.WithAPIKey(p.Token))
 		}
@@ -342,12 +367,18 @@ func (p ProviderConfig) toModel(ctx context.Context) (model.Model, error) {
 		return anthropic.New(p.ModelName, opts...), nil
 	case "ollama":
 		opts := []ollama.Option{}
+		if tailoring {
+			opts = append(opts, ollama.WithEnableTokenTailoring(true))
+		}
 		if p.Host != "" {
 			opts = append(opts, ollama.WithHost(p.Host))
 		}
 		return ollama.New(p.ModelName, opts...), nil
 	case "huggingface":
 		opts := []huggingface.Option{}
+		if tailoring {
+			opts = append(opts, huggingface.WithEnableTokenTailoring(true))
+		}
 		if p.Host != "" {
 			opts = append(opts, huggingface.WithBaseURL(p.Host))
 		}
